@@ -26,6 +26,7 @@ type concurrentStorage struct {
 	sync.Mutex
 	domain string
 	urls map[url.URL]bool
+	urlsSize int
 }
 
 func newConcurrentStorage(d string) *concurrentStorage{
@@ -47,8 +48,17 @@ func (c *concurrentStorage) add(u url.URL) (bool) {
 		return false
 	}
 	c.urls[u] = true
+	c.urlsSize++
 	return true
 }
+
+func (c *concurrentStorage) size() int {
+	c.Lock()
+	defer c.Unlock()
+	return c.urlsSize
+}
+
+
 
 // scrape visits a page and extracts all the valid urls for the given domain
 // Returns error if the target URL is empty, cannot be scrapped by access over HTTP,
@@ -204,7 +214,7 @@ func savePage(url url.URL, body []byte) bool{
 }
 
 // crawl could be called multiple times in parallel to increase productivity.
-func crawl(urlSet concurrentStorage, ch chan url.URL){
+func crawl(urlSet *concurrentStorage, ch chan url.URL){
 	for {
 		select {
 		case u := <- ch:
@@ -225,11 +235,13 @@ func crawl(urlSet concurrentStorage, ch chan url.URL){
 }
 
 
+// TODO: Add 1 sec delay before page makes request
+
 func main() {
 	var domain string
 	var timeout int
 
-	ch := make(chan url.URL, 5)
+	ch := make(chan url.URL, 2)
 
 	flag.StringVar(&domain, "host", "example.com", "url to scrape")
 	flag.IntVar(&timeout, "t", 5, "timeout")
@@ -251,17 +263,23 @@ func main() {
 
 	urlSet := newConcurrentStorage(targetURL.Host)
 
-	go crawl(*urlSet, ch)
-	go crawl(*urlSet, ch)
-	go crawl(*urlSet, ch)
-	go crawl(*urlSet, ch)
-	go crawl(*urlSet, ch)
-	go crawl(*urlSet, ch)
+	go crawl(urlSet, ch)
+	go crawl(urlSet, ch)
 
 	ch <- *targetURL
 
 	time.Sleep(time.Duration(timeout) * time.Second)
-	log.Printf("total in %d seconds = %d", timeout, len(urlSet.urls))
+	//log.Printf("total in %d seconds = %d", timeout, urlSet.size())
 }
 
-
+/* TODO:
+	1. IP simulation
+	2. Randomize wait times between each request
+	3. User Agent rotation and spoofing
+	4. Respect robots.txt
+	5. Avoid Honeypots:
+		- When following links always take care that the link has proper visibility with no nofollow tag
+		- or CSS style display:none
+		- color disguised to blend in with the page’s background color
+	6. Incorporate some random clicks on the page, mouse movements and random actions that will make a spider looks like a human
+*/
